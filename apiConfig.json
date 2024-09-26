@@ -1,0 +1,6 @@
+{
+    "canDelete": false,
+    "canUpdate": true,
+    "canInclude": true,
+    "maxActiveEnv": 2	
+}

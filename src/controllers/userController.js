@@ -1,17 +1,25 @@
 import User from '../models/User.js';
 import fs from 'fs';
 import path from 'path';
+import { fetchConfigFromJson } from '../app.js';
 
-const configPath = path.join(process.cwd(), 'apiConfig.json'); // Caminho para o arquivo de configuração
-let config;
+// Função para obter a configuração
+const getConfig = async () => {
+  const config = await fetchConfigFromJson();
+  return config; // Retorna a configuração obtida
+};
 
-try {
-  // Lê o arquivo de configuração uma vez para ser utilizado nas funções
-  const configData = fs.readFileSync(configPath, 'utf-8');
-  config = JSON.parse(configData);
-} catch (error) {
-  console.error('Erro ao ler as configurações:', error);
-}
+// Lógica para ler apiConfig Localmente na raiz
+// const configPath = path.join(process.cwd(), 'apiConfig.json'); // Caminho para o arquivo de configuração
+// let config;
+
+// try {
+//   // Lê o arquivo de configuração uma vez para ser utilizado nas funções
+//   const configData = fs.readFileSync(configPath, 'utf-8');
+//   config = JSON.parse(configData);
+// } catch (error) {
+//   console.error('Erro ao ler as configurações:', error);
+// }
 
 // Função para obter todos os usuários
 export const getAllUsers = async (req, res) => {
@@ -25,7 +33,9 @@ export const getAllUsers = async (req, res) => {
 
 // Função para criar novo usuário
 export const createUser = async (req, res) => {
-  if (!config.canInclude) {
+  const config = await getConfig();
+
+  if (!config || !config.canInclude) {
     return res.status(403).json({ message: 'Inclusão não permitida pelas configurações' });
   }
 
@@ -44,55 +54,44 @@ export const createUser = async (req, res) => {
   }
 };
 
-// Função para adicionar ambiente a usuário por id
+// Função para adicionar ambiente a usuário por id ou nome
 export const addEnvironmentToUser = async (req, res) => {
-  const { uuid } = req.params; // Pega o uuid do usuário a partir dos parâmetros da URL
-  const newEnvironment = req.body; // O novo ambiente deve ser enviado no corpo da requisição
+  const { identifier } = req.params; // Pode ser o UUID ou o nome
+  const newEnvironment = req.body; 
+  const config = await getConfig(); // Obtém as configurações do arquivo externo
 
-  if (!config.canInclude) {
+  if (!config || !config.canInclude) {
     return res.status(403).json({ message: 'Inclusão de ambientes não permitida pelas configurações' });
   }
 
   try {
-    // Localiza o usuário pelo uuid e adiciona o novo ambiente
-    const user = await User.findOneAndUpdate(
-      { uuid },
+    // Localiza o usuário pelo uuid ou pelo nome
+    const user = await User.findOne({
+      $or: [{ uuid: identifier }, { name: new RegExp(identifier, 'i') }]
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'Usuário não encontrado' });
+    }
+
+    // Conta quantos ambientes ativos o usuário já tem
+    const activeEnvironmentsCount = user.environments.filter(env => env.active).length;
+
+    // Verifica se o usuário já atingiu o limite de ambientes ativos
+    if (activeEnvironmentsCount >= config.maxActiveEnv && newEnvironment.active !== false) {
+      return res.status(400).json({
+        message: `Usuário já possui o máximo de ${config.maxActiveEnv} ambientes ativos. Não é possível adicionar mais ambientes ativos.`
+      });
+    }
+
+    // Adiciona o novo ambiente
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: user._id },
       { $push: { environments: newEnvironment } },
       { new: true, runValidators: true } // Retorna o usuário atualizado e valida o novo ambiente
     );
 
-    if (!user) {
-      return res.status(404).json({ message: 'Usuário não encontrado' });
-    }
-
-    res.status(200).json(user);
-  } catch (error) {
-    res.status(400).json({ message: 'Erro ao adicionar ambiente', error });
-  }
-};
-
-// Função para adicionar um novo ambiente ao usuário pelo nome
-export const addEnvironmentToUserByName = async (req, res) => {
-  const { name } = req.params; // Pega o nome do usuário a partir dos parâmetros da URL
-  const newEnvironment = req.body; // O novo ambiente deve ser enviado no corpo da requisição
-
-  if (!config.canInclude) {
-    return res.status(403).json({ message: 'Inclusão de ambientes não permitida pelas configurações' });
-  }
-
-  try {
-    // Localiza o usuário pelo nome
-    const user = await User.findOne({ name: { $regex: name, $options: 'i' } }); // Busca apenas o usuário
-
-    if (!user) {
-      return res.status(404).json({ message: 'Usuário não encontrado' });
-    }
-
-    // Adiciona o novo ambiente ao usuário encontrado
-    user.environments.push(newEnvironment);
-    await user.save(); // Salva as alterações no usuário
-
-    res.status(200).json(user);
+    res.status(200).json(updatedUser);
   } catch (error) {
     res.status(400).json({ message: 'Erro ao adicionar ambiente', error });
   }
@@ -144,11 +143,12 @@ export const getUserByIdOrName = async (req, res) => {
   }
 };
 
-// Função para atualizar o campo 'active' de um usuário específico
+// Função para atualizar o campo 'active' de um usuário específico para false
 export const updateUserIsActive = async (req, res) => {
   const { identifier } = req.params; // Pode ser o UUID ou o nome
+  const config = await getConfig();
 
-  if (!config.canUpdate) {
+  if (!config || !config.canUpdate) {
     return res.status(403).json({ message: 'Atualização não permitida pelas configurações' });
   }
 
@@ -201,9 +201,9 @@ export const getTopAreasWithActiveEnvironments = async (req, res) => {
 // Função para deletar um usuário
 export const deleteUser = async (req, res) => {
   const { identifier } = req.params; // Pode ser o UUID ou o nome
+  const config = await getConfig();
 
-  // Verifica se a deleção é permitida
-  if (!config.canDelete) {
+  if (!config || !config.canDelete) {
     return res.status(403).json({ message: 'Deleção não permitida pelas configurações' });
   }
 

@@ -24,6 +24,17 @@ export const fetchConfigFromJson = async () => {
 
 routes(app);
 
+// Função para buscar os dados do JSON externo
+const fetchDataFromJson = async () => {
+  try {
+    const response = await axios.get('https://manifest.engpro.totvs.com.br/apiData.json');
+    return response.data;
+  } catch (error) {
+    console.error('Erro ao buscar dados do JSON:', error);
+    return null;
+  }
+};
+
 // Função para povoar o banco de dados
 const populateDatabase = async () => {
   try {
